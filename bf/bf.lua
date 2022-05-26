@@ -1,6 +1,12 @@
 #!/usr/bin/env lua
 
-local L = require('lgen/lgen')
+-- Brainfuck-Lua Compiler Example
+
+-- Load LPG
+lg = require('lpg/lg')
+lp = require('lpg/lp')
+
+-- File R/W helpers
 
 readFile = function(filename)
   local f = io.open(filename, 'r')
@@ -15,6 +21,8 @@ writeFile = function(filename, contents)
   f:close()
 end
 
+-- Parse arguments
+
 if #arg < 2 then
   print("Usage: " .. arg[-1] .. " " .. arg[0] .. " <IN> <OUT>")
   os.exit()
@@ -23,70 +31,75 @@ end
 in_filename = arg[1]
 out_filename = arg[2]
 
-src = readFile(in_filename)
+-- Read source file
 
-b = {}
-h = {b}
 
--- local t = {}
-table.insert(b, L.set(L.raw('t'), L.tbl({L.lit(0)}), true))
--- local x = 0
-table.insert(b, L.set(L.raw('x'), L.lit(1), true))
 
-cur_v = L.idx(L.raw('t'), L.raw('x'))
+function parseBF()
+  local b = {}
+  local h = {b}
 
-zset_cond = L.bin(cur_v, '==', L.lit(nil))
-zset_ln = L.set(cur_v, L.lit(0))
-zset = L.if_({{zset_cond, {L.ln(zset_ln)}}})
+  -- local t = {}
+  table.insert(b, lg.set(lg.raw('t'), lg.tbl({lg.lit(0)}), true))
+  -- local x = 0
+  table.insert(b, lg.set(lg.raw('x'), lg.lit(1), true))
 
-acc = 0
-for i = 1, #src do
-  local c = string.sub(src, i, i)
-  if c == '+' then
-    acc = (acc + 1) % 256
-  elseif c == '-' then
-    acc = (acc + 255) % 256
-  else
-    if acc ~= 0 then
-      local a = L.bin(cur_v, '+', L.lit(acc))
-      local t = L.set(cur_v, L.bin(a, '%', L.lit(256)))
-      table.insert(h[#h], t)
-      acc = 0
-    end
-    if c == '.' then
-      local args = {L.app(L.raw('string.char'), {cur_v})}
-      table.insert(h[#h], L.ln(L.app(L.raw('io.write'), args)))
-    elseif c == ',' then
-      local r = L.app(L.raw('io.read'), {L.lit(1)})
-      local y = L.app(L.raw('string.byte'), {r})
-      table.insert(h[#h], L.set(cur_v, y))
-    elseif c == '>' then
-      local t = L.set(L.raw('x'), L.bin(L.raw('x'), '+', L.lit(1)))
-      table.insert(h[#h], t)
-      table.insert(h[#h], zset)
-    elseif c == '<' then
-      local t = L.set(L.raw('x'), L.bin(L.raw('x'), '-', L.lit(1)))
-      table.insert(h[#h], t)
-      table.insert(h[#h], zset)
-    elseif c == '[' then
-      table.insert(h, {})
-    elseif c == ']' then
-      if #h == 1 then
-        print("Syntax Error! (Too many closes)")
-        os.exit(1)
+  local cur_v = lg.idx(lg.raw('t'), lg.raw('x'))
+
+  local zset_cond = lg.bin(cur_v, '==', lg.lit(nil))
+  local zset_ln = lg.set(cur_v, lg.lit(0))
+  local zset = lg.if_({{zset_cond, {lg.ln(zset_ln)}}})
+
+  local acc = 0
+  while not lp.isEOF() do
+    if lp.isStr('+') then
+      acc = (acc + 1) % 256
+    elseif lp.isStr('-') then
+      acc = (acc + 255) % 256
+    else
+      if acc ~= 0 then
+        local a = lg.bin(cur_v, '+', lg.lit(acc))
+        local t = lg.set(cur_v, lg.bin(a, '%', lg.lit(256)))
+        table.insert(h[#h], t)
+        acc = 0
       end
-      z = h[#h]
-      h[#h] = nil
-      local cond = L.bin(cur_v, '~=', L.lit(0))
-      local w = L.whl(cond, z)
-      table.insert(h[#h], w)
+      if lp.isStr('.') then
+        local args = {lg.app(lg.raw('string.char'), {cur_v})}
+        table.insert(h[#h], lg.ln(lg.app(lg.raw('io.write'), args)))
+      elseif lp.isStr(',') then
+        local r = lg.app(lg.raw('io.read'), {lg.lit(1)})
+        local y = lg.app(lg.raw('string.byte'), {r})
+        table.insert(h[#h], lg.set(cur_v, y))
+      elseif lp.isStr('>') then
+        local t = lg.set(lg.raw('x'), lg.bin(lg.raw('x'), '+', lg.lit(1)))
+        table.insert(h[#h], t)
+        table.insert(h[#h], zset)
+      elseif lp.isStr('<') then
+        local t = lg.set(lg.raw('x'), lg.bin(lg.raw('x'), '-', lg.lit(1)))
+        table.insert(h[#h], t)
+        table.insert(h[#h], zset)
+      elseif lp.isStr('[') then
+        table.insert(h, {})
+      elseif lp.isStr(']') then
+        if #h == 1 then lp.error('too many closes') end
+        z = h[#h]
+        h[#h] = nil
+        local cond = lg.bin(cur_v, '~=', lg.lit(0))
+        local w = lg.whl(cond, z)
+        table.insert(h[#h], w)
+      end
     end
+    lp.pass()
   end
+
+  if #h > 1 then lp.error('unclosed paren exists') end
+
+  return b
 end
 
-if #h > 1 then
-  print("Syntax Error! (Unclosed paren)")
-  os.exit(1)
-end
+-- Run Parser-Generator
 
-writeFile(out_filename, L.block(b)())
+src = readFile(in_filename)
+res, ret = lp.parse(parseBF, src, in_filename)
+if res == false then error(ret) end
+writeFile(out_filename, lg.block(ret)())
