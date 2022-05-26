@@ -1,32 +1,33 @@
--- lgen.lua
--- Lua Code PP
+-- lg: Lua Code Generation Helper
 
 --[[
+  For types 
   T := Int -> Str
   M a := a -> T
-  L.raw :: M (Str) -- Raw String
-  L.lit :: M (Any) -- Literal
-  L.un :: M (op: Str, expr: T) -- Unary operator
-  L.bin :: M (lhs: T, op: Str, rhs: T) -- Binary Operator
-  L.com :: M ([T]) -- Comma
-  L.idx :: M (val: T, index: T) -- Indexing/Access
-  L.app :: M (fn: T, args: [T]) -- Function App
-  L.tbl :: M (tbl: {Any |=> T}) -- Table
-  L.block :: M ([T]) -- Indented blocks
-  L.do_ :: M ([T]) -- Do block
-  L.ln :: M (T) -- Line
-  L.set :: M (lhs: T, rhs: T, is_local: bool) -- Assignment
-  L.fn :: M (params: [Str], body: [T]) -- Function
-  L.if_ :: M ([(cond: T, body: [T]) | elsebody: T]) -- If-elseif-else
-  L.whl :: M (cond: T, body: [T]) -- while loop
+  ,
+  L.raw :: M (Str)                                      -- Raw String
+  L.lit :: M (Any)                                      -- Literal
+  L.un :: M (op: Str, expr: T)                          -- Unary operator
+  L.bin :: M (lhs: T, op: Str, rhs: T)                  -- Binary Operator
+  L.com :: M ([T])                                      -- Comma
+  L.idx :: M (val: T, index: T)                         -- Indexing/Access
+  L.app :: M (fn: T, args: [T])                         -- Function App
+  L.tbl :: M (tbl: {Any |=> T})                         -- Table
+  L.block :: M ([T])                                    -- Indented blocks
+  L.do_ :: M ([T])                                      -- Do block
+  L.ln :: M (T)                                         -- Line
+  L.set :: M (lhs: T, rhs: T, is_local: bool)           -- Assignment
+  L.fn :: M (params: [Str], body: [T])                  -- Function
+  L.if_ :: M ([(cond: T, body: [T]) | elsebody: T])     -- If-elseif-else
+  L.whl :: M (cond: T, body: [T])                       -- while loop
   L.for_ :: M (v: Str, e1-2: T, e3: Maybe T, body: [T]) -- for v=e1,e2,e3
-  L.for_in :: M (v: T, rng: T, body: [T]) -- for v in rng
-  L.ret :: M (T) -- return
-  L.brk :: M () -- break
-  L.comment :: M (Str) -- comment
+  L.for_in :: M (v: T, rng: T, body: [T])               -- for v in rng
+  L.ret :: M (T)                                        -- return
+  L.brk :: M ()                                         -- break
+  L.comment :: M (Str)                                  -- comment
 ]]
 
-local _lgen = function()
+local _lg = function()
   local L = {}
   local expectType = function(context, var_name, var, expected)
     local t = type(var)
@@ -318,4 +319,4 @@ local _lgen = function()
   return L
 end
 
-return _lgen()
+return _lg()
