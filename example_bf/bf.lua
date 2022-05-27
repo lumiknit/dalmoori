@@ -3,6 +3,7 @@
 -- Brainfuck-Lua Compiler Example
 
 -- Load LPG
+package.path = package.path .. ";../?.lua"
 lg = require('lpg/lg')
 lp = require('lpg/lp')
 

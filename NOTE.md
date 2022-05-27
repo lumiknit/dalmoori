@@ -2,7 +2,8 @@
 
 ## LPG
 
-Lua Parser & code Generator helpers
+Lack of Parser and code Generator
+ : parsing/code generation helper library
 
 - `lp`: Parser helper
 - `lg`: code Generator helper
@@ -80,6 +81,11 @@ line과 srcloc을 대응시키는 테이블을 내뱉어야 한다.
 전역 컨텍스트는 글로벌 `_C`, 에러테이블 `_E`, 소스테이블 `_S`가 있어야하고,
 저기서 생성된 코드는 `handled_call(f, _E, _S)` 처럼 에러 메시지를
 다른 것으로 바꾸는 함수에 넣고 실행해야 함.
+
+## LNG
+
+Language which is Not Good
+ : Simple PL compiled into Lua
 
 ## Examples
 
