@@ -1,322 +1,269 @@
 -- lg: Lua Code Generation Helper
 
---[[
-  For types 
-  T := Int -> Str
-  M a := a -> T
-  ,
-  L.raw :: M (Str)                                      -- Raw String
-  L.lit :: M (Any)                                      -- Literal
-  L.un :: M (op: Str, expr: T)                          -- Unary operator
-  L.bin :: M (lhs: T, op: Str, rhs: T)                  -- Binary Operator
-  L.com :: M ([T])                                      -- Comma
-  L.idx :: M (val: T, index: T)                         -- Indexing/Access
-  L.app :: M (fn: T, args: [T])                         -- Function App
-  L.tbl :: M (tbl: {Any |=> T})                         -- Table
-  L.block :: M ([T])                                    -- Indented blocks
-  L.do_ :: M ([T])                                      -- Do block
-  L.ln :: M (T)                                         -- Line
-  L.set :: M (lhs: T, rhs: T, is_local: bool)           -- Assignment
-  L.fn :: M (params: [Str], body: [T])                  -- Function
-  L.if_ :: M ([(cond: T, body: [T]) | elsebody: T])     -- If-elseif-else
-  L.whl :: M (cond: T, body: [T])                       -- while loop
-  L.for_ :: M (v: Str, e1-2: T, e3: Maybe T, body: [T]) -- for v=e1,e2,e3
-  L.for_in :: M (v: T, rng: T, body: [T])               -- for v in rng
-  L.ret :: M (T)                                        -- return
-  L.brk :: M ()                                         -- break
-  L.comment :: M (Str)                                  -- comment
-]]
+local lg = {}
 
-local _lg = function()
-  local L = {}
-  local expectType = function(context, var_name, var, expected)
-    local t = type(var)
-    if expected[t] == nil then
-      local msg = "LGen Error: Unexpected type "
-      msg = msg .. t .. " for " .. var_name .. " in " .. context
-      msg = msg .. ",\n expected one of ["
-      local e = ''
-      for k, v in pairs(expected) do
-        if #e > 0 then e = e .. ' | ' end
-        e = e .. k
-      end
-      msg = msg .. e .. ']'
-      error(msg)
-    end
-    return true
-  end
-  local expectTableOf = function(context, var_name, var, expected)
-    local passed = true
-    if type(var) == 'table' then
-      for k, v in pairs(var) do
-        if type(v) ~= 'function' then
-          passed = false
-          break
-        end
-      end
-    else
-      passed = false
-    end
-    if not passed then
-      local msg = "LGen Error: Expect table for "
-      msg = msg .. var_name .. ' in ' .. context
-      msg = msg .. ",\n containing one of ["
-      local e = ''
-      for k, v in pairs(expected) do
-        if #e > 0 then e = e .. ' | ' end
-        e = e .. k
-      end
-      msg = msg .. e .. ']'
-      error(msg)
-    end
-    return true
-  end
-  local expectFnList = function(context, var_name, var)
-    local passed = true
-    if type(var) == 'table' then
-      for k, v in pairs(var) do
-        if type(v) ~= 'function' then
-          passed = false
-          break
-        end
-      end
-    else
-      passed = false
-    end
-    if not passed then
-      local msg = "LGen Error: Expect table of generators for "
-      msg = msg .. var_name .. ' in ' .. context
-      error(msg)
-    end
-    return true
-  end
-  local indent = function(n)
-    if n == nil then return ''
-    else return string.rep(' ', 2 * n)
-    end
-  end
-  L.raw = function(s)
-    expectType('raw', 's', s, {string=1})
-    return function()
-      return s
-    end
-  end
-  L.lit = function(value)
-    expectType('lit', 'value', value,
-      {['nil']=1, boolean=1, number=1, string=1})
-    return function()
-      local s
-      if type(value) == 'string' then
-        s = string.format('%q', value)
-      else
-        s = tostring(value)
-      end
-      return s
-    end
-  end
-  L.un = function(op, ex)
-    expectType('un', 'op', op, {string=1})
-    expectType('un', 'expr', ex, {['function']=1})
-    return function(x)
-      return op .. "(" .. ex(x) .. ")"
-    end
-  end
-  L.bin = function(lhs, op, rhs)
-    expectType('bin', 'op', op, {string=1})
-    expectType('bin', 'lhs', lhs, {['function']=1})
-    expectType('bin', 'rhs', rhs, {['function']=1})
-    return function(x)
-      return "(" .. lhs(x) .. ")" .. op .. "(" .. rhs(x) .. ")"
-    end
-  end
-  L.com = function(vs)
-    expectFnList('com', 'vs', vs)
-    if #vs <= 0 then
-      error("LGen Error: Expect non-empty list for vs in com")
-    end
-    return function(x)
-      local a = ''
-      for i, v in ipairs(vs) do
-        if i > 1 then a = a .. ', ' end
-        a = a .. v(x)
-      end
-      return a
-    end
-  end
-  L.idx = function(val, idx)
-    expectType('idx', 'val', val, {['function']=1})
-    expectType('idx', 'idx', idx, {['function']=1})
-    return function(x)
-      return "(" .. val(x) .. ")[" .. idx(x) .. "]"
-    end
-  end
-  L.app = function(fn, args)
-    expectType('app', 'fn', fn, {['function']=1})
-    expectFnList('app', 'args', args)
-    return function(x)
-      local l = "(" .. fn(x) .. ")("
-      local a = ''
-      for i, v in ipairs(args) do
-        if i > 1 then a = a .. ',' end
-        a = a .. v(x)
-      end
-      return l .. a .. ")"
-    end
-  end
-  L.tbl = function(t)
-    expectFnList('tbl', 't', t)
-    return function(x)
-      local a = ''
-      local i = 1
-      for k, v in pairs(t) do
-        if #a > 0 then a = a .. ', ' end
-        if k == i then
-          a = a .. v(x)
-          i = i + 1
-        else
-          local k_ = L.lit(k)(x)
-          a = a .. '[' .. k_ .. ']=' .. v(x)
-        end
-      end
-      return '{' .. a .. '}'
-    end
-  end
-  L.block = function(bodies)
-    expectFnList('block', 'bodies', bodies)
-    return function(x)
-      if x == nil then x = -1 end
-      local ind = indent(x + 1)
-      local a = ''
-      for i, v in ipairs(bodies) do
-        if i > 1 then a = a .. '\n' end
-        a = a .. ind .. v(x + 1)
-      end
-      return a
-    end
-  end
-  L.do_ = function(body)
-    expectFnList('do', 'body', body)
-    return function(x)
-      local n_ind = '\n' .. indent(x)
-      return 'do\n' .. L.block(body)(x) .. n_ind .. 'end'
-    end
-  end
-  L.ln = function(line)
-    expectType('ln', 'line', line, {['function']=1})
-    return function(x)
-      return line(x) .. ';'
-    end
-  end
-  L.set = function(lhs, rhs, is_local)
-    expectType('set', 'lhs', lhs, {['nil']=1, ['function']=1})
-    expectType('set', 'rhs', rhs, {['function']=1})
-    expectType('set', 'is_local', is_local, {['nil']=1, boolean=1})
-    local h = ''
-    if is_local then h = 'local ' end
-    return function(x)
-      if lhs == nil then
-        return rhs(x) .. ';'
-      else
-        return h .. lhs(x) .. ' = ' .. rhs(x) .. ';'
-      end
-    end
-  end
-  L.fn = function(params, body)
-    expectTableOf('fn', 'params', params, {string=1})
-    expectFnList('fn', 'body', body)
-    return function(x)
-      local p = ''
-      for i, v in ipairs(params) do
-        if i > 1 then p = p .. ', ' end
-        p = p .. v
-      end
-      local b = L.block(body)(x)
-      return '(function(' .. p .. ')\n' .. b .. '\n' .. indent(x) .. 'end)'
-    end
-  end
-  L.if_ = function(lst)
-    expectType('if', 'lst', lst, {table=1})
-    for i, v in ipairs(lst) do
-      n = 'lst[' .. tostring(i) .. ']'
-      expectType('if', n, v, {table=1})
-      if #v <= 0 or #v > 2 then
-        error("LGen Error: # of gens for " .. n .. " in if must be in 1..2")
-      end
-      expectType('if', n .. "[1]", v[1], {['function']=1})
-      if v[2] ~= nil then
-        expectFnList('if', n .. "[2]", v[2])
-      end
-    end
-    return function(x)
-      local a = ''
-      local n_ind = '\n' .. indent(x)
-      for i, v in ipairs(lst) do
-        if v[2] == nil then
-          a = a .. 'else\n' .. v[1](x) .. n_ind
-        else
-          t = 'if ' .. v[1](x) .. ' then\n' .. L.block(v[2])(x) .. n_ind
-          if i > 1 then a = a .. 'else' end
-          a = a .. t
-        end
-      end
-      return a .. 'end'
-    end
-  end
-  L.whl = function(cond, body)
-    expectType('whl', 'cond', cond, {['function']=1})
-    expectFnList('whl', 'body', body)
-    return function(x)
-      local a = 'while ' .. cond(x) .. ' do\n'
-      local n_ind = '\n' .. indent(x)
-      return a .. L.block(body)(x) .. n_ind .. 'end'
-    end
-  end
-  L.for_ = function(v, e1, e2, e3, body)
-    expectType('for', 'v', v, {['function']=1})
-    expectType('for', 'e1', e1, {['function']=1})
-    expectType('for', 'e2', e2, {['function']=1})
-    expectType('for', 'e3', e3, {['nil']=1, ['function']=1})
-    expectFnList('for', 'body', body)
-    return function(x)
-      local rng = e1(x) .. ', ' .. e2(x)
-      if e3 ~= nil then
-        rng = rng .. ', ' .. e3(x)
-      end
-      local a = 'for ' .. v .. ' = ' .. rng .. ' do\n'
-      local n_ind = '\n' .. indent(x)
-      return a .. L.block(body)(x) .. n_ind .. 'end'
-    end
-  end
-  L.for_in = function(v, rng, body)
-    expectType('for_in', 'v', v, {['function']=1})
-    expectType('for_in', 'rng', rng, {['function']=1})
-    expectFnList('for_in', 'body', body)
-    return function(x)
-      local a = 'for ' .. v(x) .. ' in ' .. rng(x) .. ' do\n'
-      local n_ind = '\n' .. indent(x)
-      return a .. L.block(body)(x) .. n_ind .. 'end'
-    end
-  end
-  L.ret = function(e)
-    expectType('ret', 'expr', e, {['function']=1})
-    return function(x)
-      return 'return ' .. e(x) .. ';'
-    end
-  end
-  L.brk = L.raw('break')
-  L.comment = function(comment)
-    expectType('comment', 'comment', comment, {string=1})
-    local s, e = string.find(comment, '\n')
-    if s ~= nil then
-      h, t = '--[[ ', ']]'
-    else
-      h, t = '-- ', ''
-    end
-    return function(x)
-      return h .. comment .. t
-    end
-  end
-  return L
+--- Lua grammar
+
+local prec_table = {
+  ['app'] = 45, ['idx'] = 45, ['acc'] = 45,
+  ['lit'] = 42,
+  ['^'] = 38,
+  ['unary'] = 36,
+  ['*'] = 34, ['/'] = 34, ['%'] = 34,
+  ['+'] = 31, ['-'] = 31,
+  ['..'] = 26,
+  ['<<'] = 22, ['>>'] = 22,
+  ['&'] = 19,
+  ['~'] = 16,
+  ['|'] = 13,
+  ['<'] = 10, ['>'] = 10, ['<='] = 10, ['>='] = 10, ['~='] = 10, ['=='] = 10,
+  ['and'] = 7,
+  ['or'] = 4,
+  [','] = 0,
+}
+
+local escapeString = function(s)
+  local t = ("%q"):format(s)
+  return t:gsub('\\\n', '\\n')
 end
 
-return _lg()
+lg.lit = function(v)
+  if type(v) == 'string' then
+    return { escapeString(v),
+             prec = prec_table['lit'] }
+  else
+    return tostring(v)
+  end
+end
+
+lg.unop = function(op, v)
+  return { op, v, prec = prec_table['unary']}
+end
+
+lg.binop = function(lhs, op, rhs)
+  return { lhs, op, rhs,
+           sep = 1, prec = prec_table[op] }
+end
+
+lg.idx = function(v, i)
+  return { v, '[', {i}, ']',
+           prec = prec_table.idx }
+end
+
+lg.app = function(fn, args)
+  local a = { }
+  for i, v in ipairs(args) do
+    if i > 1 then a[1 + #a] = ', ' end
+    a[1 + #a] = v
+  end
+  return { fn, '(', a, ')', prec = prec_table.app }
+end
+
+lg.acc = function(v, k)
+  return { v, '.', k, prec = prec_table.acc }
+end
+
+lg.method = function(v, k)
+  return { v, ':', k, prec = prec_table.acc }
+end
+
+lg.tbl = function(tbl)
+  local t = {'{'}
+  local i = 1
+  for k, v in pairs(tbl) do
+    local z
+    if i == k then
+      i = i + 1
+      z = { v, ',' }
+    else
+      z = { '[', lg.lit(k), '] = ', v, ',' }
+    end
+    z.indent = 1
+    t[1 + #t] = z
+  end
+  t[1 + #t] = '}'
+  t.sep = 1
+  return t
+end
+
+lg.block = function(lines)
+  local t = {indent = 1, sep = 2}
+  for i, v in ipairs(lines) do
+    t[i] = v
+  end
+  return t
+end
+
+lg.top = function(lines)
+  local t = {sep = 2}
+  for i, v in ipairs(lines) do
+    t[i] = v
+  end
+  return t
+end
+
+lg.do_ = function(block)
+  return {'do', block, 'end', sep = 2}
+end
+
+lg.comma = function(lst)
+  local t = {}
+  for i, v in ipairs(lst) do
+    if i > 1 then t[1 + #t] = ', ' end
+    t[1 + #t] = v
+  end
+  return t
+end
+
+lg.set = function(lhs, rhs)
+  return {lhs, '=', rhs, sep = 1}
+end
+
+lg.local_ = function(lhs, rhs)
+  return {'local', lhs, '=', rhs, sep = 1}
+end
+
+lg.fn = function(params, body, name)
+  local p = {}
+  for i, v in ipairs(params) do
+    if i > 1 then p[1 + #p] = ', ' end
+    p[1 + #p] = v
+  end
+  local head
+  if name == nil then
+    head = {'function(', p, ')'}
+  else
+    head = {'function ', name, '(', p, ')'}
+  end
+  return {head, {body}, 'end', sep = 2, prec = prec_table.lit}
+end
+
+lg.if_ = function(lst)
+  local t = {sep = 2, lines = true}
+  for i = 1, #lst, 2 do
+    if lst[i + 1] == nil then -- Else branch
+      t[1 + #t] = lst[i]
+    elseif #t == 0 then -- If branch
+      local cond = {"if", lst[i], "then", sep = 1}
+      t[1 + #t] = cond
+      t[1 + #t] = lst[i + 1]
+    else
+      local cond = {"elseif", lst[i], "then", sep = 1}
+      t[1 + #t] = cond
+      t[1 + #t] = lst[i + 1]
+    end
+  end
+  t[1 + #t] = 'end'
+  return t
+end
+
+lg.while_ = function(cond, body)
+  local c = {"while", cond, "do", sep = 1}
+  return {c, body, 'end', sep = 2}
+end
+
+lg.for_ = function(v, e1, e2, e3, body)
+  local c = {"for ", v, " = ", e1, ", ", e2 }
+  if e3 ~= nil then
+    c[1 + #c] = ', '
+    c[1 + #c] = e3
+  end
+  c[1 + #c] = " do"
+  return {c, body, 'end', sep = 2}
+end
+
+lg.for_in = function(v, r, body)
+  local c = {'for', v, 'in', r, 'do', sep = 1}
+  return {c, body, 'end', sep = 2}
+end
+
+lg.return_ = function(v)
+  return {'return', v, sep = 1}
+end
+
+lg.break_ = function(v)
+  return {'break'}
+end
+
+--- Flatten
+
+local newBuffer = function()
+  local b = {locs={}, lines={}, buf=nil}
+  b.add = function(self, text)
+    if self.buf == nil then
+      self.buf = text
+    else
+      self.buf = self.buf .. text
+    end
+  end
+  b.ln = function(self, indent, loc)
+    if self.buf == nil then return end
+    self.locs[1 + #self.locs] = loc
+    self.lines[1 + #self.lines] = ('  '):rep(indent) .. self.buf
+    self.buf = nil
+  end
+  b.addLn = function(self, text, indent, loc)
+    self:add(text)
+    self:ln(indent, loc)
+  end
+  return b
+end
+
+lg.flatten = function(b, idx, src, indent, loc, prec)
+  -- Set indent
+  if src.indent == false then indent = 0
+  elseif src.indent ~= nil then indent = indent + src.indent
+  end
+  local next_indent = indent
+  -- Set location
+  if src.loc ~= nil then loc = src.loc end
+  -- Check precedence
+  local wrap = false
+  if prec ~= nil and src.prec ~= nil then
+    local p3 = prec % 3
+    local iz = idx == 1
+    local pcond = (p3 == 1 and not iz) or (p3 == 2 and iz)
+    if prec > src.prec or (prec == src.prec and pcond) then
+      wrap = true
+      if src.sep == 2 then
+        b:add('( ')
+        next_indent = indent + 1
+      else
+        b:add('(')
+      end
+    end
+  end
+  -- Traverse
+  for i, v in ipairs(src) do
+    if i > 1 then
+      if src.sep == 1 then
+        b:add(' ')
+      elseif src.sep == 2 then
+        b:ln(indent, loc)
+      end
+      indent = next_indent
+    end
+    if type(v) == 'string' then
+      b:add(v)
+    else
+      lg.flatten(b, i, v, indent, loc, src.prec)
+    end
+  end
+  -- Close paren
+  if src.sep == 2 then
+    b:ln(indent, loc)
+  end
+  if wrap then
+    b:add(')')
+  end
+end
+
+lg.generate = function(src)
+  -- Make an indented flatten table
+  local b = newBuffer()
+  lg.flatten(b, 0, src, 0, 0, nil)
+  b:ln(0, 0)
+  return table.concat(b.lines, '\n'), b.loc
+end
+
+return lg
