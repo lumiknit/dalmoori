@@ -30,6 +30,81 @@ local ctxt = nil
 
 local lp = {}
 
+--- Location Table
+-- This table contains information to convert between `location` (single int)
+-- and `filename:line` (single string and single int).
+-- Table looks like
+-- {off_1, file_1, off_2, file_2, ..., off_n, file_n, off_last}
+-- A line 1, 2, ..., (last) of the file `file_i` corresponds to
+-- `off_1 + 1`, `off_1 + 2`, ..., `off_2 - 1`.
+
+-- lp.initLocTable: () -> ()
+-- Initialize file location table.
+lp.initLocTable = function()
+  local t = {0}
+  -- t:add: (Str, Int|Str) -> Int
+  -- Add a file to the location table.
+  -- `lines` can be either the number of lines or the contents of file/chunk
+  -- Return value is the offset of location index.
+  -- (`Ret + k` implies the k-th line in the `name` file.)
+  t.add = function(self, name, lines)
+    local num_lines
+    if type(lines) == 'string' then
+      -- Calculate the number of lines
+      local eol = ("\n"):byte()
+
+      num_lines = 1
+      for i = 1, #lines do
+        if lines:byte(i) == eol then
+          num_lines = num_lines + 1
+        end
+      end
+    else
+      num_lines = lines
+    end
+    local off = self[#self]
+    self[#self + 1] = name
+    self[#self + 1] = off + num_lines + 2
+    return off
+  end
+
+  -- t:getFileLine: (Int) -> (Str, Int)
+  -- Convert location to filename and line number.
+  t.getFileLine = function(self, loc)
+    -- Check out of boundary
+    if loc < 0 or loc >= self[#self] then
+      return
+    end
+    -- Binary search
+    local l = 1
+    local h = math.floor(#self / 2)
+    while l < h do
+      local m = math.floor((l + h + 1) / 2)
+      if loc < self[2 * m - 1] then
+        h = m - 1
+      else
+        l = m
+      end
+    end
+    return self[2 * l], loc - self[2 * l - 1]
+  end
+
+  -- t:getOffset: (Str) -> Int
+  -- Find the location offset of the file.
+  -- Return value is the same of lp.addFileLoc
+  t.getOffset = function(self, name)
+    for i = #self - 1, 1, -2 do
+      if name == self[i] then
+        return self[i - 1]
+      end
+    end
+  end
+
+  lp.loc_t = t
+end
+
+lp.initLocTable()
+
 --- Open / Close Functions
 
 -- lp.open: (Maybe Str, Maybe Str) -> Int
@@ -48,6 +123,7 @@ lp.open = function(contents, name)
   elseif name == nil then
     name = '<unnamed>'
   end
+  local loc_off = lp.loc_t:add(name, contents)
   -- If there is a current context, save it in the stack.
   if ctxt ~= nil then
     saved_ctxt[1 + #saved_ctxt] = ctxt
@@ -56,6 +132,7 @@ lp.open = function(contents, name)
     c = contents, -- text
     name = name,  -- name
     p = 1, ln = 1, col = 1, -- current position, line number, column number
+    loc_off = loc_off, -- location offset
     saved = {}, -- savepoints
   }
   return #saved_ctxt
@@ -90,15 +167,28 @@ lp.parse = function(p, contents, name)
   return status, result
 end
 
---- Error handling
+--- Position
 
--- lp.getCurrPos: () -> Str
+-- lp.getLoc: (Maybe Int) -> Int
+-- Return the location.
+-- If line is given, it returns the location of the line,
+-- Otherwise, it returns one of the current line.
+lp.getLoc = function(line)
+  if line == nil then
+    line = ctxt.ln
+  end
+  return ctxt.loc_off + line
+end
+
+-- lp.getCurrPosStr: () -> Str
 -- Return the indicator of cursor in the current context.
 -- The format is `<FILENAME>:<LINE>:<COLUMN>`.
 -- Line numbers and column numbers start from 1.
-lp.getCurrPos = function()
+lp.getCurrPosStr = function()
   return string.format('%s:%d:%d', ctxt.name, ctxt.ln, ctxt.col)
 end
+
+--- Error handling
 
 -- lp.error: (Str) -> ERR
 -- Create an error with message as below form:
@@ -106,7 +196,7 @@ end
 -- > <FILENAME>:<LINE>:<COLUMN>: <MAIN MESSAGE>
 lp.error = function(msg)
   local f = 'Parse Error in lp\n'
-  local pos = lp.getCurrPos()
+  local pos = lp.getCurrPosStr()
   error(f .. pos .. ': ' .. msg)
 end
 
