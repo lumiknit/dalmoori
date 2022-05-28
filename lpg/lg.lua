@@ -85,7 +85,7 @@ lg.op = function(a, b, c)
   end
 end
 
-lg.idx = function(v, i)
+lg.index = function(v, i)
   return { v, '[', {i}, ']', prec = prec_table.idx }
 end
 
@@ -120,22 +120,23 @@ lg.wrap = function(v)
 end
 
 lg.table = function(tbl)
-  local t = { '{' }
-  local i = 1
-  for k, v in pairs(tbl) do
-    local z
-    if i == k then
-      i = i + 1
-      z = { v, ',' }
-    else
-      z = { '[', lg.lit(k), '] = ', v, ',' }
-    end
-    z.indent = 1
-    t[1 + #t] = z
+  local l1 = {sep = 1}
+  local l2 = {sep = 2}
+  local visited = {}
+  for i, v in ipairs(tbl) do
+    visited[i] = true
+    l1[#l1 + 1] = { v, ',', indent = 1, sep = 0 }
   end
-  t[1 + #t] = '}'
-  t.sep = 1
-  return t
+  for k, v in pairs(tbl) do
+    if not visited[k] then
+      l2[#l2 + 1] = { '[', lg.literal(k), '] = ', v, ',', indent = 1, }
+    end
+  end
+  if #l2 <= 0 then
+    return { '{', l1, '}', sep = 1 }
+  else
+    return { '{', l1, l2, '}', indent = 0, sep = 2 }
+  end
 end
 
 lg.block = function(lines, indent)
@@ -223,19 +224,31 @@ end
 --- Flatten
 
 local newBuffer = function()
-  local b = { locs = {}, lines = {}, buf = nil }
-  b.add = function(self, text)
-    self.buf = (self.buf or '') .. text
+  local b = {
+    locs = {},
+    lines = {},
+    buf = nil,
+    ind = nil,
+    loc = nil
+  }
+  b.add = function(self, text, indent, loc)
+    if self.buf == nil then
+      self.buf = text
+      self.ind = indent
+      self.loc = loc
+    else
+      self.buf = self.buf .. text
+    end
   end
-  b.ln = function(self, indent, loc)
+  b.ln = function(self)
     if self.buf == nil then return end
     if loc == nil then loc = self.locs[#self.locs] or 0 end
-    self.locs[1 + #self.locs] = loc
-    self.lines[1 + #self.lines] = ('  '):rep(indent) .. self.buf
-    self.buf = nil
+    self.locs[1 + #self.locs] = self.loc
+    self.lines[1 + #self.lines] = ('  '):rep(self.ind) .. self.buf
+    self.buf, self.ind, self.loc = nil, nil, nil
   end
   b.addLn = function(self, text, indent, loc)
-    self:add(text)
+    self:add(text, indent, loc)
     self:ln(indent, loc)
   end
   return b
@@ -253,32 +266,28 @@ lg.flatten = function(b, idx, src, indent, loc, prec)
   local wrap = false
   if prec ~= nil and src.prec ~= nil then
     local p3 = prec % 3
-    local pcond = p3 ~= 0 and (p3 == 2) ~= (idx == 1)
+    local pcond = p3 ~= 0 and (p3 == 1) ~= (idx == 1)
     if prec > src.prec or (prec == src.prec and pcond) then
       wrap = true
-      if src.sep == 2 then
-        b:add('( ')
-        next_indent = indent + 1
-      else
-        b:add('(')
-      end
+      b:add('(', indent, loc)
+      next_indent = indent + 1
     end
   end
   -- Traverse
   for i, v in ipairs(src) do
     if i > 1 then
-      if src.sep == 1 then b:add(' ')
-      elseif src.sep == 2 then b:ln(indent, loc)
+      if src.sep == 1 then b:add(' ', indent, loc)
+      elseif src.sep == 2 then b:ln()
       end
       indent = next_indent
     end
-    if type(v) == 'string' then b:add(v)
+    if type(v) == 'string' then b:add(v, indent, loc)
     else lg.flatten(b, i, v, indent, loc, src.prec)
     end
   end
   -- Close paren
-  if src.sep == 2 then b:ln(indent, loc) end
-  if wrap then b:add(')') end
+  --if src.sep == 2 then b:ln() end
+  if wrap then b:add(')', indent, loc) end
 end
 
 lg.reduceLocTable = function(loc)
